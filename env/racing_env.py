@@ -15,8 +15,8 @@ class RacingEnv:
     ]
     ACTION_NAMES = ["accelerate", "accel + left", "accel + right", "brake", "coast"]
 
-    def __init__(self, render=False):
-        self.race = Race(wall_mode="reset", allow_reverse=False)
+    def __init__(self, render=False, wall_mode="reset"):
+        self.race = Race(wall_mode=wall_mode, allow_reverse=False)
         self.n_actions = len(self.ACTIONS)
         self.obs_size = len(config.RAY_ANGLES) + 2      # rays + speed + heading
 

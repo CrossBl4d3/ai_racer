@@ -45,6 +45,30 @@ ALLOW_REVERSE = True          # humans can reverse; the AI will train without it
 # --- Neural network ---
 HIDDEN_SIZES = [128, 128]     # neurons in each hidden layer
 
+# --- DQN learning ---
+AGENT_BACKEND = "torch"       # "torch" or "numpy": which of your two networks to train
+GAMMA = 0.99                  # how much future rewards count
+LEARNING_RATE = 5e-4
+BATCH_SIZE = 64
+BUFFER_SIZE = 100_000
+WARMUP_STEPS = 5_000          # experiences collected before learning starts
+EPSILON_START = 1.0
+EPSILON_END = 0.05
+EPSILON_DECAY_STEPS = 100_000
+TARGET_UPDATE_EVERY = 1_000   # decisions between target-network refreshes
+DOUBLE_DQN = True
+GRAD_CLIP = 10.0
+
+# --- Watching and racing ---
+HUMAN_RECORD = 5.68           # seconds: your best lap on Track 1
+AI_CAR_HUE_SHIFT = 195        # turns the Kenney car blue for the AI in race mode
+CAR_COLOURS = {               # name -> hue shift applied to the orange Kenney car
+    "red": -25, "blue": 195, "green": 95, "purple": 255,
+    "gold": 22, "pink": 305, "cyan": 160,
+}
+TORCH_CAR_COLOUR = "red"      # duel colour for PyTorch models (.pt)
+NUMPY_CAR_COLOUR = "gold"     # duel colour for YOUR from-scratch models (.npz)
+
 # --- Colours (R, G, B) ---
 COLOR_GRASS = (76, 140, 60)
 COLOR_ROAD = (70, 70, 75)
@@ -58,6 +82,8 @@ COLOR_MESSAGE = (255, 230, 80)
 COLOR_CRASH = (255, 60, 60)
 COLOR_KERB_A = (210, 40, 40)
 COLOR_KERB_B = (245, 245, 245)
+COLOR_Q_BAR = (90, 140, 255)
+COLOR_Q_CHOSEN = (255, 215, 0)
 
 # --- AI environment ---
 RAY_ANGLES = [-90, -60, -30, 0, 30, 60, 90]   # degrees, relative to where the car faces
@@ -73,3 +99,8 @@ REWARD_STEP = -0.01           # per decision: a small push to hurry
 
 COLOR_RAY = (0, 220, 255)
 COLOR_RAY_HIT = (255, 80, 80)
+
+# --- Training run ---
+TRAIN_STEPS = 150_000         # total decisions per training run
+EVAL_EVERY = 10_000           # decisions between greedy test drives
+PRINT_EVERY = 5_000           # decisions between progress lines

@@ -210,7 +210,7 @@ def format_time(steps):
     return f"{steps_to_seconds(steps):.2f} s"
 
 
-def draw_hud(screen, race, font, big_font, small_font, message):
+def draw_hud(screen, race, font, big_font, small_font, message, controls=None):
     cx, cy = config.TRACK_CENTER
     speed_kmh = int(abs(race.car.speed) / config.CAR_MAX_SPEED * 200)
     gear = " (R)" if race.car.speed < 0 else ""
@@ -229,7 +229,8 @@ def draw_hud(screen, race, font, big_font, small_font, message):
     if message:
         draw_text_centered(screen, big_font, message, config.COLOR_MESSAGE, (cx, top + 170))
 
-    controls = "Arrows: drive (hold Down to reverse)   C: checkpoints   H: hitbox   R: restart   Esc: quit"
+    if controls is None:
+        controls = "Arrows: drive (hold Down to reverse)   C: checkpoints   H: hitbox   R: restart   Esc: quit"
     draw_text_centered(screen, small_font, controls, config.COLOR_HUD_TEXT,
                        (config.SCREEN_WIDTH // 2, config.SCREEN_HEIGHT - 20))
 
