@@ -17,15 +17,19 @@ class Race:
         self.last_lap_steps = None
         self.reset()
 
-    def reset(self):
-        self.car.reset(self.track.start_x, self.track.start_y, self.track.start_angle)
-        self.next_checkpoint = 1
+    def reset(self, start_gate=0, nudge=(0.0, 0.0, 0.0)):
+        """Start a new race at any gate. nudge = (dx, dy, dangle) shifts the start slightly."""
+        x, y, angle = self.track.start_pose(start_gate)
+        dx, dy, dangle = nudge
+        self.car.reset(x + dx, y + dy, angle + dangle)
+        self.start_gate = start_gate                       # this gate is the finish line
+        self.next_checkpoint = (start_gate + 1) % config.NUM_CHECKPOINTS
         self.laps_completed = 0
         self.lap_steps = 0
         self.crashed = False
 
     def checkpoints_passed(self):
-        return (self.next_checkpoint - 1) % config.NUM_CHECKPOINTS
+        return (self.next_checkpoint - self.start_gate - 1) % config.NUM_CHECKPOINTS
 
     def step(self, throttle, brake, steer):
         events = {"crashed": False, "checkpoint": False, "lap": False, "timeout": False}
@@ -48,7 +52,7 @@ class Race:
         new_pos = (self.car.x, self.car.y)
         if self.track.crossed_checkpoint(old_pos, new_pos, self.next_checkpoint):
             events["checkpoint"] = True
-            if self.next_checkpoint == 0:
+            if self.next_checkpoint == self.start_gate:   # back at the start: a full lap
                 events["lap"] = True
                 self.laps_completed += 1
                 self.last_lap_steps = self.lap_steps

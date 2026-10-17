@@ -15,16 +15,34 @@ def lap_seconds(steps):
     return None if steps is None else steps / config.STEPS_PER_SECOND
 
 
-def evaluate(agent):
-    """One greedy test drive (no random actions). The game is deterministic, so one is enough."""
-    env = RacingEnv()
-    observation = env.reset()
+def drive(agent, env, start_gate=None, nudge=None):
+    """One greedy drive (no random actions). Returns (finished, total_seconds, best_lap_steps, reason)."""
+    observation = env.reset(start_gate, nudge)
+    env.race.best_lap_steps = None          # count only THIS drive's laps
     done = False
     while not done:
         action = agent.act(observation, explore=False)
         observation, reward, terminated, truncated, info = env.step(action)
         done = terminated or truncated
-    return info
+    finished = info["reason"] == "finished"
+    seconds = info["episode_steps"] / config.STEPS_PER_SECOND
+    return finished, seconds, info["best_lap_steps"], info["reason"]
+
+
+def evaluate(agent):
+    """Test drives from evenly spaced gates. Score = average 3-lap time (lower is better);
+    a drive that doesn't finish counts as EVAL_FAIL_TIME seconds."""
+    env = RacingEnv()
+    gates = [i * config.NUM_CHECKPOINTS // config.EVAL_DRIVES for i in range(config.EVAL_DRIVES)]
+    times, finished_count, best_lap = [], 0, None
+    for gate in gates:
+        finished, seconds, lap_steps, _ = drive(agent, env, start_gate=gate)
+        times.append(seconds if finished else config.EVAL_FAIL_TIME)
+        finished_count += finished
+        if lap_steps is not None and (best_lap is None or lap_steps < best_lap):
+            best_lap = lap_steps
+    return {"score": float(np.mean(times)), "finished": finished_count,
+            "drives": len(gates), "best_lap_steps": best_lap}
 
 
 def plot_training(csv_path, png_path):
@@ -79,8 +97,9 @@ def train(steps, backend, name, seed):
     csv_path = os.path.join("logs", f"{name}.csv")
     png_path = os.path.join("logs", f"{name}.png")
 
-    env = RacingEnv()
-    agent = DQNAgent(env.obs_size, env.n_actions, backend=backend, seed=seed)
+    env = RacingEnv(random_start=config.RANDOM_START, seed=seed)
+    agent = DQNAgent(env.obs_size, env.n_actions, backend=backend, seed=seed,
+                     learning_rate_end=config.LEARNING_RATE_END, lr_decay_steps=steps)
 
     log_file = open(csv_path, "w", newline="")
     log = csv.writer(log_file)
@@ -92,7 +111,7 @@ def train(steps, backend, name, seed):
     observation = env.reset()
     episode = 0
     recent_rewards, recent_gates, recent_losses = [], [], []
-    best_eval_reward = -np.inf
+    best_score = np.inf
     best_lap_ever = None
     start_time = time.time()
 
@@ -140,12 +159,13 @@ def train(steps, backend, name, seed):
                 lap = lap_seconds(result["best_lap_steps"])
                 lap_text = f"{lap:.2f}s" if lap else "--"
                 marker = ""
-                if result["episode_reward"] > best_eval_reward:
-                    best_eval_reward = result["episode_reward"]
+                if result["score"] < best_score:
+                    best_score = result["score"]
                     agent.save(best_path)
                     marker = "  <-- NEW BEST, saved"
-                print(f"   TEST DRIVE: reward {result['episode_reward']:7.2f} | laps {result['laps']} | "
-                      f"best lap {lap_text} | ended: {result['reason']}{marker}")
+                print(f"   TEST DRIVES: {result['finished']}/{result['drives']} finished | "
+                      f"avg 3-lap time {result['score']:6.2f}s | best lap {lap_text} | "
+                      f"lr {agent.current_learning_rate():.1e}{marker}")
 
     except KeyboardInterrupt:
         print("\nStopped early by you.")

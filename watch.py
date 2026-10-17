@@ -251,13 +251,14 @@ def duel(model_a, model_b, laps, chosen_colours=None):
     sprites = [drawing.CarSprite(config.CAR_SPRITE_PATH, config.CAR_COLOURS[c]) for c in colours]
     cx, cy = config.TRACK_CENTER
 
-    def new_duel():
+    def new_duel(random_start):
+        gate, nudge = envs[0].random_start_position() if random_start else (0, None)
         for env in envs:
-            env.reset()
+            env.reset(gate, nudge)                     # both cars get the SAME start
         return {"frame": 0, "countdown": 2 * config.FPS, "actions": [0, 0],
-                "totals": [None, None], "winner": None}
+                "totals": [None, None], "winner": None, "gate": gate}
 
-    state = new_duel()
+    state = new_duel(random_start=False)
     fast = False
     running = True
     while running:
@@ -268,7 +269,9 @@ def duel(model_a, model_b, laps, chosen_colours=None):
                 if event.key == pygame.K_ESCAPE:
                     running = False
                 elif event.key == pygame.K_r:
-                    state = new_duel()
+                    state = new_duel(random_start=False)
+                elif event.key == pygame.K_n:
+                    state = new_duel(random_start=True)
                 elif event.key == pygame.K_f:
                     fast = not fast
 
@@ -285,9 +288,12 @@ def duel(model_a, model_b, laps, chosen_colours=None):
                 envs[i].race.step(*RacingEnv.ACTIONS[state["actions"][i]])
                 if envs[i].race.laps_completed >= laps:
                     state["totals"][i] = state["frame"]
+                    seconds = state["frame"] / config.STEPS_PER_SECOND
                     if state["winner"] is None:
                         state["winner"] = f"{names[i]} ({colours[i]}) WINS!"
-                        print(f"{names[i]} wins in {state['frame'] / config.STEPS_PER_SECOND:.2f} s")
+                        print(f"Start gate {state['gate']}:  {names[i]} wins in {seconds:.2f} s")
+                    else:
+                        print(f"               {names[i]} finishes in {seconds:.2f} s")
 
         screen.blit(background, (0, 0))
         for i in (1, 0):                                       # red drawn on top
@@ -301,14 +307,14 @@ def duel(model_a, model_b, laps, chosen_colours=None):
                 best = f"{r.best_lap_steps / config.STEPS_PER_SECOND:.2f} s" if r.best_lap_steps else "--"
                 text = f"{names[i]} ({colours[i]}): lap {min(r.laps_completed + 1, laps)}/{laps}   best lap {best}"
             drawing.draw_text_centered(screen, font, text, config.COLOR_HUD_TEXT, (cx, cy - 60 + i * 35))
-        drawing.draw_text_centered(screen, small_font, f"Race time: {state['frame'] / config.STEPS_PER_SECOND:.2f} s",
-                                   config.COLOR_HUD_TEXT, (cx, cy + 20))
+        drawing.draw_text_centered(screen, small_font, f"Race time: {state['frame'] / config.STEPS_PER_SECOND:.2f} s"
+                                   f"   (start/finish: gate {state['gate']})", config.COLOR_HUD_TEXT, (cx, cy + 20))
         if state["countdown"] > 0:
             drawing.draw_text_centered(screen, big_font, str(state["countdown"] // config.FPS + 1),
                                        config.COLOR_MESSAGE, (cx, cy + 70))
         elif state["winner"]:
             drawing.draw_text_centered(screen, big_font, state["winner"], config.COLOR_MESSAGE, (cx, cy + 70))
-        drawing.draw_text_centered(screen, small_font, "F: fast-forward   R: restart   Esc: quit",
+        drawing.draw_text_centered(screen, small_font, "F: fast-forward   R: replay   N: new random start   Esc: quit",
                                    config.COLOR_HUD_TEXT, (config.SCREEN_WIDTH // 2, config.SCREEN_HEIGHT - 20))
         pygame.display.flip()
         clock.tick(config.FPS)

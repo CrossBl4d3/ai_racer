@@ -12,6 +12,8 @@ class DQNAgent:
         # Every setting comes from config.py unless overridden here (the tests use this)
         self.gamma = settings.get("gamma", config.GAMMA)
         self.learning_rate = settings.get("learning_rate", config.LEARNING_RATE)
+        self.learning_rate_end = settings.get("learning_rate_end", self.learning_rate)
+        self.lr_decay_steps = settings.get("lr_decay_steps", 1)
         self.batch_size = settings.get("batch_size", config.BATCH_SIZE)
         self.warmup_steps = settings.get("warmup_steps", config.WARMUP_STEPS)
         self.epsilon_start = settings.get("epsilon_start", config.EPSILON_START)
@@ -91,9 +93,22 @@ class DQNAgent:
             return None                                       # still warming up
         batch = self.buffer.sample(self.batch_size, self.rng)
         self.learn_steps += 1
+        self._update_learning_rate()
         if self.backend == "torch":
             return self._learn_torch(*batch)
         return self._learn_numpy(*batch)
+
+    def current_learning_rate(self):
+        fraction = min(1.0, self.learn_steps / self.lr_decay_steps)
+        return self.learning_rate + fraction * (self.learning_rate_end - self.learning_rate)
+
+    def _update_learning_rate(self):
+        lr = self.current_learning_rate()
+        if self.backend == "torch":
+            for group in self.optimizer.param_groups:
+                group["lr"] = lr
+        else:
+            self.optimizer.lr = lr
 
     def _learn_torch(self, states, actions, rewards, next_states, terminated):
         states = torch.from_numpy(states)

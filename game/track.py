@@ -76,18 +76,21 @@ class Track:
         (x1, y1), (x2, y2) = self.checkpoints[index]
         return ((x1 + x2) / 2, (y1 + y2) / 2)
 
-    def _compute_start(self):
-        x0, y0 = self.gate_midpoint(0)
-        x1, y1 = self.gate_midpoint(1)
+    def start_pose(self, gate):
+        """Where a car starts if its race begins at this gate: (x, y, angle)."""
+        x0, y0 = self.gate_midpoint(gate)
+        x1, y1 = self.gate_midpoint((gate + 1) % len(self.checkpoints))
 
         dx = x1 - x0
         dy = y1 - y0
-        self.start_angle = math.degrees(math.atan2(dy, dx))
+        angle = math.degrees(math.atan2(dy, dx))
 
         distance = math.hypot(dx, dy)
         forward = config.CAR_LENGTH / 2 + 5
-        self.start_x = x0 + dx / distance * forward
-        self.start_y = y0 + dy / distance * forward
+        return x0 + dx / distance * forward, y0 + dy / distance * forward, angle
+
+    def _compute_start(self):
+        self.start_x, self.start_y, self.start_angle = self.start_pose(0)
 
     def check_collision(self, corners):
         for edge_start, edge_end in loop_segments(corners):

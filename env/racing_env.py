@@ -15,8 +15,10 @@ class RacingEnv:
     ]
     ACTION_NAMES = ["accelerate", "accel + left", "accel + right", "brake", "coast"]
 
-    def __init__(self, render=False, wall_mode="reset"):
+    def __init__(self, render=False, wall_mode="reset", random_start=False, seed=None):
         self.race = Race(wall_mode=wall_mode, allow_reverse=False)
+        self.random_start = random_start
+        self.rng = np.random.default_rng(seed)
         self.n_actions = len(self.ACTIONS)
         self.obs_size = len(config.RAY_ANGLES) + 2      # rays + speed + heading
 
@@ -31,8 +33,23 @@ class RacingEnv:
     # ------------------------------------------------------------------
     #  The two core functions
     # ------------------------------------------------------------------
-    def reset(self):
-        self.race.reset()
+    def random_start_position(self):
+        """A random gate plus a small random nudge to position and angle."""
+        gate = int(self.rng.integers(config.NUM_CHECKPOINTS))
+        nudge = (self.rng.uniform(-config.START_JITTER_POS, config.START_JITTER_POS),
+                 self.rng.uniform(-config.START_JITTER_POS, config.START_JITTER_POS),
+                 self.rng.uniform(-config.START_JITTER_ANGLE, config.START_JITTER_ANGLE))
+        return gate, nudge
+
+    def reset(self, start_gate=None, nudge=None):
+        if start_gate is None:
+            if self.random_start:
+                start_gate, nudge = self.random_start_position()
+            else:
+                start_gate = 0
+        self.race.reset(start_gate, nudge or (0.0, 0.0, 0.0))
+        if self.race.track.check_collision(self.race.car.get_corners()):
+            self.race.reset(start_gate)                     # nudge hit a wall: start un-nudged
         self.steps_since_progress = 0
         self.episode_steps = 0
         self.episode_reward = 0.0
