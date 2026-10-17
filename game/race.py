@@ -128,6 +128,10 @@ def draw_car_polygon(screen, car, colour):
     pygame.draw.polygon(screen, colour, corners)
     pygame.draw.line(screen, config.COLOR_CHECKPOINT, corners[0], corners[1], 4)
 
+def draw_rays(screen, origin, hit_points):
+    for point in hit_points:
+        pygame.draw.line(screen, config.COLOR_RAY, origin, point, 1)
+        pygame.draw.circle(screen, config.COLOR_RAY_HIT, (int(point[0]), int(point[1])), 4)
 
 def draw_hitbox(screen, car):
     pygame.draw.polygon(screen, config.COLOR_HITBOX, car.get_corners(), 1)

@@ -56,3 +56,18 @@ COLOR_MESSAGE = (255, 230, 80)
 COLOR_CRASH = (255, 60, 60)
 COLOR_KERB_A = (210, 40, 40)
 COLOR_KERB_B = (245, 245, 245)
+
+# --- AI environment ---
+RAY_ANGLES = [-90, -60, -30, 0, 30, 60, 90]   # degrees, relative to where the car faces
+RAY_LENGTH = 300              # pixels: how far each sensor can see
+FRAME_SKIP = 4                # physics steps per AI decision
+EPISODE_LAPS = 3              # laps needed to "finish" an episode
+NO_PROGRESS_LIMIT = 3         # seconds without a new checkpoint before the episode is cut off
+
+REWARD_CHECKPOINT = 1.0
+REWARD_LAP = 10.0
+REWARD_CRASH = -10.0
+REWARD_STEP = -0.01           # per decision: a small push to hurry
+
+COLOR_RAY = (0, 220, 255)
+COLOR_RAY_HIT = (255, 80, 80)

@@ -23,6 +23,30 @@ def loop_segments(points):
     return [(points[i], points[(i + 1) % n]) for i in range(n)]
 
 
+def ray_cast(origin, angle_degrees, max_length, walls):
+    """Shoot a ray from origin in a direction. Return the distance to the
+    nearest wall it hits, or max_length if it hits nothing."""
+    px, py = origin
+    rad = math.radians(angle_degrees)
+    rx = math.cos(rad) * max_length          # the ray as a vector r
+    ry = math.sin(rad) * max_length
+
+    closest_t = 1.0                          # 1.0 = the full ray length
+    for (qx, qy), (ex, ey) in walls:
+        sx = ex - qx                         # the wall as a vector s
+        sy = ey - qy
+        denom = rx * sy - ry * sx            # cross(r, s)
+        if denom == 0:
+            continue                         # parallel: they never meet
+        dx = qx - px
+        dy = qy - py
+        t = (dx * sy - dy * sx) / denom      # how far along the ray (0..1)
+        u = (dx * ry - dy * rx) / denom      # how far along the wall (0..1)
+        if 0 <= t < closest_t and 0 <= u <= 1:
+            closest_t = t
+    return closest_t * max_length
+
+
 class Track:
     def __init__(self):
         cx, cy = config.TRACK_CENTER
@@ -48,13 +72,13 @@ class Track:
 
         self._compute_start()
 
-    def _gate_midpoint(self, index):
+    def gate_midpoint(self, index):
         (x1, y1), (x2, y2) = self.checkpoints[index]
         return ((x1 + x2) / 2, (y1 + y2) / 2)
 
     def _compute_start(self):
-        x0, y0 = self._gate_midpoint(0)
-        x1, y1 = self._gate_midpoint(1)
+        x0, y0 = self.gate_midpoint(0)
+        x1, y1 = self.gate_midpoint(1)
 
         dx = x1 - x0
         dy = y1 - y0
@@ -75,3 +99,6 @@ class Track:
     def crossed_checkpoint(self, old_pos, new_pos, index):
         gate_start, gate_end = self.checkpoints[index]
         return segments_intersect(old_pos, new_pos, gate_start, gate_end)
+
+    def cast_ray(self, origin, angle_degrees, max_length):
+        return ray_cast(origin, angle_degrees, max_length, self.walls)
