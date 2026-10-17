@@ -42,6 +42,8 @@ LAP_TIME_LIMIT = 60           # seconds
 WALL_MODE = "solid"           # "solid" = walls block the car, "reset" = crash sends you back to start
 ALLOW_REVERSE = True          # humans can reverse; the AI will train without it
 
+# --- Neural network ---
+HIDDEN_SIZES = [128, 128]     # neurons in each hidden layer
 
 # --- Colours (R, G, B) ---
 COLOR_GRASS = (76, 140, 60)
