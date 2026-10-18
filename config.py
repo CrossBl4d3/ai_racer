@@ -133,3 +133,5 @@ MIRROR_AUGMENT = True         # also learn from the mirror image of every experi
 HARD_START_FRACTION = 0.5     # share of training starts placed just before recent crash spots
 HARD_START_BACK = (3, 10)     # start between this many gates before the crash spot
 CRASH_MEMORY = 0.995          # older crashes fade: each new crash shrinks all old counts a little
+FAIR_START_PROBE_SECONDS = 1.5   # fair-start dry run: how long each steering test lasts
+FAIR_START_GATES = 2          # ...and how many gates it must get through to count as winnable

@@ -2,6 +2,7 @@ import math
 import numpy as np
 import config
 from game.race import Race
+from game.track import cross
 
 
 class RacingEnv:
@@ -30,7 +31,10 @@ class RacingEnv:
         # Where the car crashes, per track and gate, so training can practise those spots
         self.hard_starts = hard_starts
         self.crash_counts = {name: np.zeros(race.track.num_gates()) for name, race in self.races.items()}
-
+        
+                # How many nudged starts were checked, and how many had to fall back to the plain start
+        self.starts_checked = 0
+        self.unfair_starts = 0
         self.render_enabled = render
         self.screen = None                              # window is created on first render
         self.background_track = None                    # which track the background shows
@@ -72,6 +76,33 @@ class RacingEnv:
                  self.rng.uniform(-config.START_JITTER_ANGLE, config.START_JITTER_ANGLE))
         return gate, nudge
 
+
+    def is_fair_start(self, gate, nudge):
+        """Could a good driver win from this start? It must (1) not touch a wall, (2) not be past
+        the first gate it has to cross, and (3) get through the next gates with SOME steering."""
+        race, track = self.race, self.race.track
+        race.reset(gate, nudge)
+        car = race.car
+        if track.check_collision(car.get_corners()):
+            return False
+        a, b = track.checkpoints[race.next_checkpoint]
+        car_side = cross(a, b, (car.x, car.y)) > 0
+        gate_side = cross(a, b, track.gate_midpoint(gate)) > 0
+        if car_side != gate_side:
+            return False                                    # already past it: could never score it
+
+        probe_steps = int(config.FAIR_START_PROBE_SECONDS * config.STEPS_PER_SECOND)
+        for steer in (-1, 0, 1):                            # dry runs: hold left, straight, right
+            race.reset(gate, nudge)
+            for _ in range(probe_steps):
+                events = race.step(True, False, steer)
+                if events["crashed"]:
+                    break
+                if race.checkpoints_passed() >= config.FAIR_START_GATES:
+                    return True                             # a winning line exists
+        return False
+
+    
     def reset(self, start_gate=None, nudge=None, track=None):
         if track is not None:
             self.race = self.races[track]                   # a specific track was asked for
@@ -83,9 +114,13 @@ class RacingEnv:
                 start_gate, nudge = self.random_start_position()
             else:
                 start_gate = 0
-        self.race.reset(start_gate, nudge or (0.0, 0.0, 0.0))
-        if self.race.track.check_collision(self.race.car.get_corners()):
-            self.race.reset(start_gate)                     # nudge hit a wall: start un-nudged
+        nudge = tuple(nudge) if nudge else (0.0, 0.0, 0.0)
+        if nudge != (0.0, 0.0, 0.0):
+            self.starts_checked += 1
+            if not self.is_fair_start(start_gate, nudge):
+                nudge = (0.0, 0.0, 0.0)                     # unfair nudge: use the plain start
+                self.unfair_starts += 1
+        self.race.reset(start_gate, nudge)                  # (also clears the dry runs)
         self.steps_since_progress = 0
         self.episode_steps = 0
         self.episode_reward = 0.0
