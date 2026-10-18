@@ -7,7 +7,7 @@ from env.racing_env import RacingEnv
 from agent.network import QNetwork
 from agent.numpy_network import NumpyQNetwork, huber_loss, Adam
 
-N_IN = len(config.RAY_ANGLES) + 2
+N_IN = len(config.RAY_ANGLES) + 2 + len(config.LOOKAHEAD_GATES)
 N_OUT = 5
 results = []
 

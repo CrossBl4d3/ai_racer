@@ -9,8 +9,8 @@ def steps_to_seconds(steps):
 
 
 class Race:
-    def __init__(self, wall_mode=config.WALL_MODE, allow_reverse=config.ALLOW_REVERSE):
-        self.track = Track()
+    def __init__(self, wall_mode=config.WALL_MODE, allow_reverse=config.ALLOW_REVERSE, track_name=None):
+        self.track = Track(track_name)
         self.car = Car(allow_reverse=allow_reverse)
         self.wall_mode = wall_mode
         self.best_lap_steps = None
@@ -23,13 +23,13 @@ class Race:
         dx, dy, dangle = nudge
         self.car.reset(x + dx, y + dy, angle + dangle)
         self.start_gate = start_gate                       # this gate is the finish line
-        self.next_checkpoint = (start_gate + 1) % config.NUM_CHECKPOINTS
+        self.next_checkpoint = (start_gate + 1) % self.track.num_gates()
         self.laps_completed = 0
         self.lap_steps = 0
         self.crashed = False
 
     def checkpoints_passed(self):
-        return (self.next_checkpoint - self.start_gate - 1) % config.NUM_CHECKPOINTS
+        return (self.next_checkpoint - self.start_gate - 1) % self.track.num_gates()
 
     def step(self, throttle, brake, steer):
         events = {"crashed": False, "checkpoint": False, "lap": False, "timeout": False}
@@ -59,7 +59,7 @@ class Race:
                 if self.best_lap_steps is None or self.lap_steps < self.best_lap_steps:
                     self.best_lap_steps = self.lap_steps
                 self.lap_steps = 0
-            self.next_checkpoint = (self.next_checkpoint + 1) % config.NUM_CHECKPOINTS
+            self.next_checkpoint = (self.next_checkpoint + 1) % self.track.num_gates()
 
         # --- Time limit ---
         if self.lap_steps >= config.LAP_TIME_LIMIT * config.STEPS_PER_SECOND:
@@ -170,12 +170,11 @@ def build_background(track):
     pygame.draw.line(background, config.COLOR_WALL, start, end, 5)
 
     # 5. Decorations (purely visual: not walls, never touched by the physics)
-    cx, cy = config.TRACK_CENTER
     tree = load_image(config.TREE_PATH)
     if tree is not None:
         tree = pygame.transform.smoothscale(tree, (60, 60))
-        for dx, dy in [(-250, -60), (-250, 60), (250, -60), (250, 60)]:
-            background.blit(tree, tree.get_rect(center=(cx + dx, cy + dy)))
+        for position in track.trees:
+            background.blit(tree, tree.get_rect(center=position))
     tires = load_image(config.TIRES_PATH)
     if tires is not None:
         tires = pygame.transform.smoothscale(tires, (36, 36))
@@ -215,7 +214,10 @@ def format_time(steps):
 
 
 def draw_hud(screen, race, font, big_font, small_font, message, controls=None):
-    cx, cy = config.TRACK_CENTER
+    cx, cy = race.track.hud_center
+    panel = pygame.Surface((380, 165), pygame.SRCALPHA)
+    panel.fill((0, 0, 0, 110))                      # see-through dark box behind the text
+    screen.blit(panel, panel.get_rect(center=(cx, cy - 30)))
     speed_kmh = int(abs(race.car.speed) / config.CAR_MAX_SPEED * 200)
     gear = " (R)" if race.car.speed < 0 else ""
 
@@ -223,7 +225,7 @@ def draw_hud(screen, race, font, big_font, small_font, message, controls=None):
         f"Laps: {race.laps_completed}",
         f"Time: {format_time(race.lap_steps)}",
         f"Last: {format_time(race.last_lap_steps)}    Best: {format_time(race.best_lap_steps)}",
-        f"Checkpoints: {race.checkpoints_passed()} / {config.NUM_CHECKPOINTS}",
+        f"Checkpoints: {race.checkpoints_passed()} / {race.track.num_gates()}",
         f"Speed: {speed_kmh} km/h{gear}",
     ]
     top = cy - 90
@@ -243,17 +245,17 @@ def draw_hud(screen, race, font, big_font, small_font, message, controls=None):
 #  Play loop (runs only with:  python -m game.race)
 # =====================================================================
 
-def main():
+def main(track_name):
     pygame.init()
     screen = pygame.display.set_mode((config.SCREEN_WIDTH, config.SCREEN_HEIGHT))
-    pygame.display.set_caption("AI Racer")
+    pygame.display.set_caption(f"AI Racer - {track_name}")
     clock = pygame.time.Clock()
 
     font = pygame.font.Font(None, 30)
     big_font = pygame.font.Font(None, 48)
     small_font = pygame.font.Font(None, 22)
 
-    race = Race()
+    race = Race(track_name=track_name)
     background = build_background(race.track)                  # after set_mode!
     car_sprite = CarSprite(config.CAR_SPRITE_PATH, config.CAR_HUE_SHIFT)
 
@@ -331,4 +333,14 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    from game.tracks import track_names
+    parser = argparse.ArgumentParser(description="Play AI Racer yourself.")
+    parser.add_argument("--track", default=config.DEFAULT_TRACK, choices=track_names(),
+                        help="which track to drive (add _mirror to drive it the other way round)")
+    parser.add_argument("--list", action="store_true", help="list all tracks and exit")
+    args = parser.parse_args()
+    if args.list:
+        print("Tracks:", ", ".join(track_names()))
+    else:
+        main(args.track)

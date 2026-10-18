@@ -3,6 +3,8 @@
     python watch.py                              watch the best model of run1
     python watch.py --model models/numpy1_best.npz
     python watch.py --race                       you (arrows) vs the AI
+    python watch.py --duel models/run1_best.pt models/numpy1_best.npz     AI vs AI
+    add  --track hairpin  to any of these to use another track (T in watch mode: next track)
 """
 import argparse
 import os
@@ -13,17 +15,21 @@ from env.racing_env import RacingEnv
 from agent.dqn_agent import DQNAgent
 from game.race import Race
 from game import race as drawing
+from game.tracks import track_names
+from agent.brains import saved_input_size, lookahead_for
 
 
 def load_agent(model_path, env):
     if not os.path.exists(model_path):
         sys.exit(f"Model not found: {model_path}\nTrain one first with:  python train.py")
     backend = "numpy" if model_path.endswith(".npz") else "torch"
-    agent = DQNAgent(env.obs_size, env.n_actions, backend=backend, buffer_size=1)
+    n_inputs = saved_input_size(model_path)
+    env.set_lookahead(lookahead_for(n_inputs))         # old models: 9 inputs, new: 11
+    agent = DQNAgent(n_inputs, env.n_actions, backend=backend, buffer_size=1)
     agent.load(model_path)
-    print(f"Loaded {model_path} ({backend} network)")
+    agent.lookahead = env.lookahead
+    print(f"Loaded {model_path} ({backend} network, {n_inputs} inputs)")
     return agent
-
 
 def setup_window(title):
     pygame.init()
@@ -33,10 +39,13 @@ def setup_window(title):
     return screen, pygame.time.Clock(), fonts
 
 
-def draw_q_panel(screen, font, q_values, chosen):
+def draw_q_panel(screen, font, q_values, chosen, center):
     """Five bars: how good the AI thinks each action is right now."""
-    cx, cy = config.TRACK_CENTER
-    left, top, bar_width = cx - 150, cy + 55, 160
+    cx, cy = center
+    left, top, bar_width = cx - 160, cy - 45, 160
+    box = pygame.Surface((340, 96), pygame.SRCALPHA)
+    box.fill((0, 0, 0, 110))                                         # see-through dark box
+    screen.blit(box, (left - 8, top - 4))
     low, high = float(min(q_values)), float(max(q_values))
     span = max(high - low, 1e-6)
     for i, (name, q) in enumerate(zip(RacingEnv.ACTION_NAMES, q_values)):
@@ -54,21 +63,26 @@ def draw_q_panel(screen, font, q_values, chosen):
 #  Watch mode
 # =====================================================================
 
-def watch(model_path):
-    env = RacingEnv()
+def watch(model_path, track):
+    all_tracks = track_names()
+    env = RacingEnv(tracks=all_tracks)                 # every track built once, so T can switch instantly
     agent = load_agent(model_path, env)
-    screen, clock, (font, big_font, small_font) = setup_window("AI Racer - Watching the AI")
-    background = drawing.build_background(env.race.track)
+    screen, clock, (font, big_font, small_font) = setup_window(f"AI Racer - Watching the AI - {track}")
     sprite = drawing.CarSprite(config.CAR_SPRITE_PATH, config.CAR_HUE_SHIFT)
 
-    observation = env.reset()
+    def start(name):
+        pygame.display.set_caption(f"AI Racer - Watching the AI - {name}")
+        print(f"--- {name} ---")
+        return env.reset(track=name), drawing.build_background(env.races[name].track)
+
+    observation, background = start(track)
     q_values = agent.q_values(observation)
     action = int(q_values.argmax())
     paused, fast = False, False
     message, message_timer = "", 0
     laps_seen = 0
     finished_timer = 0                     # pause after an episode ends, before restarting
-    controls = "Space: pause   F: fast-forward   R: restart   Esc: quit"
+    controls = "Space: pause   F: fast   R: restart   T: next track   Esc: quit"
 
     running = True
     while running:
@@ -83,7 +97,10 @@ def watch(model_path):
                 elif event.key == pygame.K_f:
                     fast = not fast
                 elif event.key == pygame.K_r:
-                    observation, laps_seen, finished_timer = env.reset(), 0, 0
+                    observation, laps_seen, finished_timer = env.reset(track=track), 0, 0
+                elif event.key == pygame.K_t:
+                    track = all_tracks[(all_tracks.index(track) + 1) % len(all_tracks)]
+                    (observation, background), laps_seen, finished_timer = start(track), 0, 0
 
         if not paused and finished_timer == 0:
             for _ in range(4 if fast else 1):
@@ -94,9 +111,13 @@ def watch(model_path):
                 if info["laps"] > laps_seen:                      # a lap was just completed
                     laps_seen = info["laps"]
                     lap = env.race.last_lap_steps / config.STEPS_PER_SECOND
-                    difference = lap - config.HUMAN_RECORD
-                    verdict = "faster" if difference < 0 else "slower"
-                    print(f"Lap {laps_seen}: {lap:.2f} s  ({abs(difference):.2f} s {verdict} than your {config.HUMAN_RECORD} s)")
+                    record = config.HUMAN_RECORDS.get(track)
+                    if record:
+                        difference = lap - record
+                        verdict = "faster" if difference < 0 else "slower"
+                        print(f"Lap {laps_seen}: {lap:.2f} s  ({abs(difference):.2f} s {verdict} than your {record} s)")
+                    else:
+                        print(f"Lap {laps_seen}: {lap:.2f} s  (no record of yours on {track} yet)")
                     message, message_timer = f"LAP {lap:.2f} s", 30
 
                 if terminated or truncated:
@@ -107,7 +128,7 @@ def watch(model_path):
         elif finished_timer > 0:
             finished_timer -= 1
             if finished_timer == 0:
-                observation, laps_seen = env.reset(), 0
+                observation, laps_seen = env.reset(track=track), 0
 
         if message_timer > 0:
             message_timer -= 1
@@ -118,9 +139,13 @@ def watch(model_path):
         screen.blit(background, (0, 0))
         drawing.draw_rays(screen, (car.x, car.y), env.ray_hit_points)
         sprite.draw(screen, car, False)
+        drawing.draw_hud(screen, env.race, font, big_font, small_font, "", controls)
+        draw_q_panel(screen, small_font, q_values, action, env.race.track.q_panel_center)
         shown = ("PAUSED" if paused else message) + ("   (x4)" if fast else "")
-        drawing.draw_hud(screen, env.race, font, big_font, small_font, shown, controls)
-        draw_q_panel(screen, small_font, q_values, action)
+        if shown:                                   # drawn just above the car, clear of the panels
+            x = min(max(car.x, 130), config.SCREEN_WIDTH - 130)
+            y = max(car.y - 45, 30)
+            drawing.draw_text_centered(screen, big_font, shown, config.COLOR_MESSAGE, (x, y))
         pygame.display.flip()
         clock.tick(config.FPS // config.FRAME_SKIP)              # real-time speed
 
@@ -131,15 +156,15 @@ def watch(model_path):
 #  Race mode: you vs the AI
 # =====================================================================
 
-def race(model_path, laps):
-    ai_env = RacingEnv(wall_mode="solid")          # in a race, walls block both cars
+def race(model_path, laps, track):
+    ai_env = RacingEnv(wall_mode="solid", track_name=track)    # in a race, walls block both cars
     agent = load_agent(model_path, ai_env)
     screen, clock, (font, big_font, small_font) = setup_window("AI Racer - You vs the AI")
     background = drawing.build_background(ai_env.race.track)
     human_sprite = drawing.CarSprite(config.CAR_SPRITE_PATH, config.CAR_HUE_SHIFT)
     ai_sprite = drawing.CarSprite(config.CAR_SPRITE_PATH, config.AI_CAR_HUE_SHIFT)
-    human = Race(wall_mode="solid", allow_reverse=True)
-    cx, cy = config.TRACK_CENTER
+    human = Race(wall_mode="solid", allow_reverse=True, track_name=track)
+    cx, cy = human.track.hud_center
 
     def new_race():
         human.reset()
@@ -226,6 +251,7 @@ def race(model_path, laps):
 
     pygame.quit()
 
+
 # =====================================================================
 #  Duel mode: AI vs AI
 # =====================================================================
@@ -241,15 +267,15 @@ def pick_colours(model_a, model_b, chosen):
     return colours
 
 
-def duel(model_a, model_b, laps, chosen_colours=None):
+def duel(model_a, model_b, laps, track, chosen_colours=None):
     names = [os.path.splitext(os.path.basename(path))[0] for path in (model_a, model_b)]
-    envs = [RacingEnv(wall_mode="solid"), RacingEnv(wall_mode="solid")]
+    envs = [RacingEnv(wall_mode="solid", track_name=track), RacingEnv(wall_mode="solid", track_name=track)]
     agents = [load_agent(model_a, envs[0]), load_agent(model_b, envs[1])]
     screen, clock, (font, big_font, small_font) = setup_window("AI Racer - AI vs AI")
     background = drawing.build_background(envs[0].race.track)
     colours = pick_colours(model_a, model_b, chosen_colours)
     sprites = [drawing.CarSprite(config.CAR_SPRITE_PATH, config.CAR_COLOURS[c]) for c in colours]
-    cx, cy = config.TRACK_CENTER
+    cx, cy = envs[0].race.track.hud_center
 
     def new_duel(random_start):
         gate, nudge = envs[0].random_start_position() if random_start else (0, None)
@@ -296,7 +322,7 @@ def duel(model_a, model_b, laps, chosen_colours=None):
                         print(f"               {names[i]} finishes in {seconds:.2f} s")
 
         screen.blit(background, (0, 0))
-        for i in (1, 0):                                       # red drawn on top
+        for i in (1, 0):                                       # first car drawn on top
             sprites[i].draw(screen, envs[i].race.car, False)
 
         for i in range(2):
@@ -320,6 +346,8 @@ def duel(model_a, model_b, laps, chosen_colours=None):
         clock.tick(config.FPS)
 
     pygame.quit()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Watch or race your trained AI.")
     parser.add_argument("--model", default=os.path.join("models", "run1_best.pt"))
@@ -328,10 +356,11 @@ if __name__ == "__main__":
     parser.add_argument("--colours", nargs=2, choices=list(config.CAR_COLOURS), metavar=("COLOUR_A", "COLOUR_B"),
                         help=f"duel car colours, from: {', '.join(config.CAR_COLOURS)}")
     parser.add_argument("--laps", type=int, default=config.EPISODE_LAPS)
+    parser.add_argument("--track", default=config.DEFAULT_TRACK, choices=track_names())
     args = parser.parse_args()
     if args.duel:
-        duel(args.duel[0], args.duel[1], args.laps, args.colours)
+        duel(args.duel[0], args.duel[1], args.laps, args.track, args.colours)
     elif args.race:
-        race(args.model, args.laps)
+        race(args.model, args.laps, args.track)
     else:
-        watch(args.model)
+        watch(args.model, args.track)

@@ -14,16 +14,26 @@ class RacingEnv:
         (False, False,  0),   # 4: coast
     ]
     ACTION_NAMES = ["accelerate", "accel + left", "accel + right", "brake", "coast"]
+    MIRROR_ACTION = [0, 2, 1, 3, 4]      # in a mirror, left and right swap; everything else stays
 
-    def __init__(self, render=False, wall_mode="reset", random_start=False, seed=None):
-        self.race = Race(wall_mode=wall_mode, allow_reverse=False)
+    def __init__(self, render=False, wall_mode="reset", random_start=False, seed=None,
+                 track_name=None, tracks=None, lookahead=None, hard_starts=False):
+        # One Race per track, built once. With several tracks, each episode picks one at random.
+        names = tracks or [track_name or config.DEFAULT_TRACK]
+        self.races = {name: Race(wall_mode=wall_mode, allow_reverse=False, track_name=name) for name in names}
+        self.race = self.races[names[0]]
         self.random_start = random_start
         self.rng = np.random.default_rng(seed)
         self.n_actions = len(self.ACTIONS)
-        self.obs_size = len(config.RAY_ANGLES) + 2      # rays + speed + heading
+        self.set_lookahead(config.LOOKAHEAD_GATES if lookahead is None else lookahead)
+
+        # Where the car crashes, per track and gate, so training can practise those spots
+        self.hard_starts = hard_starts
+        self.crash_counts = {name: np.zeros(race.track.num_gates()) for name, race in self.races.items()}
 
         self.render_enabled = render
         self.screen = None                              # window is created on first render
+        self.background_track = None                    # which track the background shows
         self.closed = False
 
         self.ray_hit_points = []
@@ -33,15 +43,41 @@ class RacingEnv:
     # ------------------------------------------------------------------
     #  The two core functions
     # ------------------------------------------------------------------
+    def set_lookahead(self, gates):
+        """Which gates ahead the car is told about. Older models were trained with none."""
+        self.lookahead = list(gates)
+        self.obs_size = len(config.RAY_ANGLES) + 2 + len(self.lookahead)   # rays + speed + headings
+
+    @staticmethod
+    def mirror_observation(observation):
+        """What the car would see on the mirror-image track: rays swap sides, directions flip."""
+        n_rays = len(config.RAY_ANGLES)
+        mirrored = observation.copy()
+        mirrored[:n_rays] = observation[:n_rays][::-1]        # rightmost ray becomes leftmost
+        mirrored[n_rays + 1:] = -observation[n_rays + 1:]      # left of the car becomes right
+        return mirrored                                        # (speed, at n_rays, stays the same)
+
     def random_start_position(self):
         """A random gate plus a small random nudge to position and angle."""
-        gate = int(self.rng.integers(config.NUM_CHECKPOINTS))
+        n = self.race.track.num_gates()
+        counts = self.crash_counts[self.race.track.name]
+        if self.hard_starts and counts.sum() > 0 and self.rng.random() < config.HARD_START_FRACTION:
+            crash_gate = int(self.rng.choice(n, p=counts / counts.sum()))   # busy crash spots more often
+            back = int(self.rng.integers(*config.HARD_START_BACK))
+            gate = (crash_gate - back) % n                                  # a run-up before the corner
+        else:
+            gate = int(self.rng.integers(n))
         nudge = (self.rng.uniform(-config.START_JITTER_POS, config.START_JITTER_POS),
                  self.rng.uniform(-config.START_JITTER_POS, config.START_JITTER_POS),
                  self.rng.uniform(-config.START_JITTER_ANGLE, config.START_JITTER_ANGLE))
         return gate, nudge
 
-    def reset(self, start_gate=None, nudge=None):
+    def reset(self, start_gate=None, nudge=None, track=None):
+        if track is not None:
+            self.race = self.races[track]                   # a specific track was asked for
+        elif len(self.races) > 1:
+            names = list(self.races)
+            self.race = self.races[names[int(self.rng.integers(len(names)))]]
         if start_gate is None:
             if self.random_start:
                 start_gate, nudge = self.random_start_position()
@@ -80,6 +116,9 @@ class RacingEnv:
 
             if events["crashed"]:
                 reward += config.REWARD_CRASH
+                for counts in self.crash_counts.values():
+                    counts *= config.CRASH_MEMORY                           # old crashes fade
+                self.crash_counts[self.race.track.name][self.race.next_checkpoint] += 1
                 terminated, reason = True, "crashed"
                 break
             if self.race.laps_completed >= config.EPISODE_LAPS:
@@ -135,13 +174,17 @@ class RacingEnv:
         # 8: speed
         speed = car.speed / config.CAR_MAX_SPEED
 
-        # 9: direction to the next checkpoint (-1 = far left, 0 = dead ahead, +1 = far right)
-        gx, gy = track.gate_midpoint(self.race.next_checkpoint)
-        target_angle = math.degrees(math.atan2(gy - car.y, gx - car.x))
-        difference = (target_angle - car.angle + 180) % 360 - 180
-        heading = difference / 180
+        # 9+: direction to the next checkpoint, then to gates further ahead
+        #     (-1 = far left, 0 = dead ahead, +1 = far right)
+        headings = []
+        for ahead in [0] + self.lookahead:
+            gate = (self.race.next_checkpoint + ahead) % track.num_gates()
+            gx, gy = track.gate_midpoint(gate)
+            target_angle = math.degrees(math.atan2(gy - car.y, gx - car.x))
+            difference = (target_angle - car.angle + 180) % 360 - 180
+            headings.append(difference / 180)
 
-        return np.array(distances + [speed, heading], dtype=np.float32)
+        return np.array(distances + [speed] + headings, dtype=np.float32)
 
     # ------------------------------------------------------------------
     #  Watching (optional)
@@ -161,13 +204,16 @@ class RacingEnv:
             self.font = pygame.font.Font(None, 30)
             self.big_font = pygame.font.Font(None, 48)
             self.small_font = pygame.font.Font(None, 22)
-            self.background = drawing.build_background(self.race.track)
             self.car_sprite = drawing.CarSprite(config.CAR_SPRITE_PATH, config.CAR_HUE_SHIFT)
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.close()
                 return
+
+        if self.background_track is not self.race.track:
+            self.background = drawing.build_background(self.race.track)    # the track changed
+            self.background_track = self.race.track
 
         car = self.race.car
         self.screen.blit(self.background, (0, 0))
@@ -176,10 +222,12 @@ class RacingEnv:
         drawing.draw_hud(self.screen, self.race, self.font, self.big_font, self.small_font, "")
 
         observation = self._get_observation()
-        rays_text = "Rays: " + " ".join(f"{value:.2f}" for value in observation[:-2])
-        extra_text = (f"Speed: {observation[-2]:.2f}   Heading: {observation[-1]:+.2f}   "
+        n_rays = len(config.RAY_ANGLES)
+        rays_text = "Rays: " + " ".join(f"{value:.2f}" for value in observation[:n_rays])
+        headings = " ".join(f"{value:+.2f}" for value in observation[n_rays + 1:])
+        extra_text = (f"Speed: {observation[n_rays]:.2f}   Headings: {headings}   "
                       f"Reward: {self.last_reward:+.2f}   Episode: {self.episode_reward:+.2f}")
-        cx, cy = config.TRACK_CENTER
+        cx, cy = self.race.track.hud_center
         drawing.draw_text_centered(self.screen, self.small_font, rays_text, config.COLOR_HUD_TEXT, (cx, cy + 115))
         drawing.draw_text_centered(self.screen, self.small_font, extra_text, config.COLOR_HUD_TEXT, (cx, cy + 140))
 

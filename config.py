@@ -35,7 +35,9 @@ TRACK_CENTER = (500, 350)
 TRACK_RADIUS_X = 380          # half-width of the oval's centre line
 TRACK_RADIUS_Y = 250          # half-height of the oval's centre line
 ROAD_WIDTH = 110
-NUM_CHECKPOINTS = 40
+NUM_CHECKPOINTS = 40          # gates on the oval (other tracks space gates by GATE_SPACING)
+GATE_SPACING = 30             # pixels between gates on spline tracks (smaller = smoother walls)
+DEFAULT_TRACK = "oval"
 
 # --- Race ---
 LAP_TIME_LIMIT = 60           # seconds
@@ -62,6 +64,12 @@ GRAD_CLIP = 10.0
 
 # --- Watching and racing ---
 HUMAN_RECORD = 5.68           # seconds: your best lap on Track 1
+HUMAN_RECORDS = {             # your best lap per track (fill these in as you set them)
+    "oval": 5.68,
+    "bean": 16.21,
+    "hairpin": 11.25,
+    "wiggle": 25.45,
+}
 AI_CAR_HUE_SHIFT = 195        # turns the Kenney car blue for the AI in race mode
 CAR_COLOURS = {               # name -> hue shift applied to the orange Kenney car
     "red": -25, "blue": 195, "green": 95, "purple": 255,
@@ -110,3 +118,18 @@ START_JITTER_POS = 8          # pixels: random nudge to the start position
 START_JITTER_ANGLE = 10       # degrees: random nudge to the start angle
 EVAL_DRIVES = 5               # test drives per evaluation, from evenly spaced gates
 EVAL_FAIL_TIME = 60           # seconds counted for a test drive that doesn't finish
+
+
+# --- Multi-track training (Phase 8) ---
+TRAIN_TRACKS = ["oval", "bean", "hairpin", "wiggle",
+                "oval_mirror", "bean_mirror", "hairpin_mirror", "wiggle_mirror"]
+TEST_TRACK = "technical"      # NEVER trained on: the final exam
+MULTI_TRAIN_STEPS = 300_000   # more tracks to learn = more practice needed
+EVAL_DRIVES_PER_TRACK = 2     # multi-track test drives: this many per training track
+FINE_TUNE_EPSILON = 0.3       # exploration starts here when continuing from a trained model
+# --- Corner fixes (Phase 8) ---
+LOOKAHEAD_GATES = [4, 8]      # extra inputs: direction to the gate this many gates ahead ([] = old 9 inputs)
+MIRROR_AUGMENT = True         # also learn from the mirror image of every experience
+HARD_START_FRACTION = 0.5     # share of training starts placed just before recent crash spots
+HARD_START_BACK = (3, 10)     # start between this many gates before the crash spot
+CRASH_MEMORY = 0.995          # older crashes fade: each new crash shrinks all old counts a little
