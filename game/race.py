@@ -334,9 +334,9 @@ def main(track_name):
 
 if __name__ == "__main__":
     import argparse
-    from game.tracks import track_names
+    from game.tracks import track_names, track_name
     parser = argparse.ArgumentParser(description="Play AI Racer yourself.")
-    parser.add_argument("--track", default=config.DEFAULT_TRACK, choices=track_names(),
+    parser.add_argument("--track", default=config.DEFAULT_TRACK, type=track_name,
                         help="which track to drive (add _mirror to drive it the other way round)")
     parser.add_argument("--list", action="store_true", help="list all tracks and exit")
     args = parser.parse_args()

@@ -15,7 +15,7 @@ from env.racing_env import RacingEnv
 from agent.dqn_agent import DQNAgent
 from game.race import Race
 from game import race as drawing
-from game.tracks import track_names
+from game.tracks import track_names, track_name
 from agent.brains import saved_input_size, lookahead_for
 
 
@@ -65,6 +65,8 @@ def draw_q_panel(screen, font, q_values, chosen, center):
 
 def watch(model_path, track):
     all_tracks = track_names()
+    if track not in all_tracks:
+        all_tracks.insert(0, track)                    # e.g. random_17: add it to the T cycle
     env = RacingEnv(tracks=all_tracks)                 # every track built once, so T can switch instantly
     agent = load_agent(model_path, env)
     screen, clock, (font, big_font, small_font) = setup_window(f"AI Racer - Watching the AI - {track}")
@@ -356,7 +358,7 @@ if __name__ == "__main__":
     parser.add_argument("--colours", nargs=2, choices=list(config.CAR_COLOURS), metavar=("COLOUR_A", "COLOUR_B"),
                         help=f"duel car colours, from: {', '.join(config.CAR_COLOURS)}")
     parser.add_argument("--laps", type=int, default=config.EPISODE_LAPS)
-    parser.add_argument("--track", default=config.DEFAULT_TRACK, choices=track_names())
+    parser.add_argument("--track", default=config.DEFAULT_TRACK, type=track_name)
     args = parser.parse_args()
     if args.duel:
         duel(args.duel[0], args.duel[1], args.laps, args.track, args.colours)

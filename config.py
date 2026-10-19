@@ -38,6 +38,14 @@ ROAD_WIDTH = 110
 NUM_CHECKPOINTS = 40          # gates on the oval (other tracks space gates by GATE_SPACING)
 GATE_SPACING = 30             # pixels between gates on spline tracks (smaller = smoother walls)
 DEFAULT_TRACK = "oval"
+# --- Random tracks (8F) ---
+RANDOM_TRACK_RADII = (390, 250)      # size of the base ellipse (x, y) in pixels
+RANDOM_TRACK_POINTS = (9, 16)         # how many control points (fewest, most)
+RANDOM_TRACK_WOBBLE = (0.1, 0.55)    # how far each point may be pushed in/out (share of the radius)
+RANDOM_TRACK_DENT_CHANCE = 0.5       # chance of one deep dent (a hairpin-like bend)
+RANDOM_TRACK_DENT_DEPTH = (0.4, 0.7)   # a dented point keeps this share of its radius
+RANDOM_TRACK_WIDTH = (75, 110)       # road width range in pixels
+RANDOM_TRACK_MAX_ATTEMPTS = 200      # shapes tried per seed before giving up
 
 # --- Race ---
 LAP_TIME_LIMIT = 60           # seconds

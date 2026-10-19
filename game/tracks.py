@@ -59,10 +59,32 @@ def track_names(include_mirrors=True):
     return names
 
 
+def random_seed(name):
+    """'random_17' -> 17. Any other name -> None."""
+    if name.startswith("random_") and name[len("random_"):].isdigit():
+        return int(name[len("random_"):])
+    return None
+
+
 def get_definition(name):
-    """Returns (definition, mirrored) for a name like 'bean' or 'bean_mirror'."""
+    """Returns (definition, mirrored) for a name like 'bean', 'bean_mirror' or 'random_17'."""
     mirrored = name.endswith("_mirror")
     base = name[:-len("_mirror")] if mirrored else name
+    seed = random_seed(base)
+    if seed is not None:
+        from game.random_tracks import random_definition     # imported here to avoid a loop
+        return random_definition(seed)[0], mirrored
     if base not in TRACKS:
-        raise ValueError(f"Unknown track '{name}'. Available: {', '.join(track_names())}")
+        raise ValueError(f"Unknown track '{name}'. Available: {', '.join(track_names())}, "
+                         f"or random_<number> (e.g. random_17)")
     return TRACKS[base], mirrored
+
+
+def track_name(text):
+    """For argparse: accept any valid track name, including random_<number>."""
+    import argparse
+    try:
+        get_definition(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error))
+    return text
