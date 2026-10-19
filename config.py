@@ -117,7 +117,6 @@ RANDOM_START = True           # training episodes start at a random gate
 START_JITTER_POS = 8          # pixels: random nudge to the start position
 START_JITTER_ANGLE = 10       # degrees: random nudge to the start angle
 EVAL_DRIVES = 5               # test drives per evaluation, from evenly spaced gates
-EVAL_FAIL_TIME = 60           # seconds counted for a test drive that doesn't finish
 
 
 # --- Multi-track training (Phase 8) ---
@@ -135,3 +134,4 @@ HARD_START_BACK = (3, 10)     # start between this many gates before the crash s
 CRASH_MEMORY = 0.995          # older crashes fade: each new crash shrinks all old counts a little
 FAIR_START_PROBE_SECONDS = 1.5   # fair-start dry run: how long each steering test lasts
 FAIR_START_GATES = 2          # ...and how many gates it must get through to count as winnable
+PICK_FINISH_TOLERANCE = 1     # pick_best.py: snapshots this many finishes short of the best still count

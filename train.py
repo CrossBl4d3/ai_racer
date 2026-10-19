@@ -3,6 +3,7 @@
     python train.py --name run3                                   one track (the oval)
     python train.py --name multi1 --tracks train                  every training track
     python train.py --name multi2 --tracks train --init models/numpy2_best.npz   start from a trained brain
+    python train.py --name pace1 --tracks train --backend numpy --step-penalty -0.05   hurry more
 """
 import argparse
 import csv
@@ -39,25 +40,37 @@ def drive(agent, env, start_gate=None, nudge=None, track=None):
     return finished, seconds, info["best_lap_steps"], info["reason"], laps_driven
 
 
-def evaluate(agent, env):
-    """Test drives from evenly spaced gates on every track in env. Score = average 3-lap time
-    (lower is better); a drive that doesn't finish counts as EVAL_FAIL_TIME seconds."""
+def evaluate(agent, env, per_track=None, starts=None):
+    """Test drives on every track in env: evenly spaced gates, or the given (track, gate, nudge) starts.
+    Returns how many finished, and the pace: seconds per lap driven, counting crashed drives too
+    (their time and their part-laps), so a driver can't look fast just by skipping hard races."""
     tracks = list(env.races)
-    per_track = config.EVAL_DRIVES if len(tracks) == 1 else config.EVAL_DRIVES_PER_TRACK
-    times, finished_count, best_lap, failed_on = [], 0, None, []
-    for track in tracks:
-        n = env.races[track].track.num_gates()
-        for i in range(per_track):
-            gate = i * n // per_track
-            finished, seconds, lap_steps, _, _ = drive(agent, env, start_gate=gate, track=track)
-            times.append(seconds if finished else config.EVAL_FAIL_TIME)
-            finished_count += finished
-            if not finished and track not in failed_on:
-                failed_on.append(track)
-            if lap_steps is not None and (best_lap is None or lap_steps < best_lap):
-                best_lap = lap_steps
-    return {"score": float(np.mean(times)), "finished": finished_count, "drives": len(times),
+    if starts is None:
+        per_track = per_track or (config.EVAL_DRIVES if len(tracks) == 1 else config.EVAL_DRIVES_PER_TRACK)
+        starts = [(track, i * env.races[track].track.num_gates() // per_track, None)
+                  for track in tracks for i in range(per_track)]
+    finished_count, total_seconds, total_laps, best_lap, failed_on = 0, 0.0, 0.0, None, []
+    for track, gate, nudge in starts:
+        finished, seconds, lap_steps, _, laps_driven = drive(agent, env, gate, nudge, track)
+        finished_count += finished
+        total_seconds += seconds
+        total_laps += laps_driven
+        if not finished and track not in failed_on:
+            failed_on.append(track)
+        if lap_steps is not None and (best_lap is None or lap_steps < best_lap):
+            best_lap = lap_steps
+    pace = total_seconds / max(total_laps, 1e-6)
+    return {"finished": finished_count, "drives": len(starts), "pace": pace,
             "best_lap_steps": best_lap, "failed_on": failed_on}
+
+
+def is_better(result, best):
+    """Selection rule: finish more races first; with equal finishes, the faster pace wins."""
+    if best is None:
+        return True
+    if result["finished"] != best["finished"]:
+        return result["finished"] > best["finished"]
+    return result["pace"] < best["pace"]
 
 
 def plot_training(csv_path, png_path):
@@ -103,7 +116,7 @@ def plot_training(csv_path, png_path):
     plt.close(fig)
 
 
-def train(steps, backend, name, seed, tracks, init=None):
+def train(steps, backend, name, seed, tracks, init=None, epsilon_start=None, learning_rate=None):
     os.makedirs("models", exist_ok=True)
     os.makedirs("logs", exist_ok=True)
     extension = ".pt" if backend == "torch" else ".npz"
@@ -111,6 +124,8 @@ def train(steps, backend, name, seed, tracks, init=None):
     latest_path = os.path.join("models", f"{name}_latest{extension}")
     csv_path = os.path.join("logs", f"{name}.csv")
     png_path = os.path.join("logs", f"{name}.png")
+    snaps_dir = os.path.join("models", f"{name}_snaps")         # a copy of the brain at every test
+    os.makedirs(snaps_dir, exist_ok=True)
 
     if config.TEST_TRACK in tracks:
         print(f"WARNING: '{config.TEST_TRACK}' is the exam track. Training on it spoils the exam!")
@@ -120,15 +135,22 @@ def train(steps, backend, name, seed, tracks, init=None):
     settings = {}
     if init:
         settings["epsilon_start"] = config.FINE_TUNE_EPSILON       # it can already drive: explore less
+    if epsilon_start is not None:
+        settings["epsilon_start"] = epsilon_start
+    lr_end = config.LEARNING_RATE_END
+    if learning_rate is not None:
+        settings["learning_rate"] = learning_rate                 # e.g. small steps when fine-tuning
+        lr_end = min(lr_end, learning_rate)
     agent = DQNAgent(env.obs_size, env.n_actions, backend=backend, seed=seed,
-                     learning_rate_end=config.LEARNING_RATE_END, lr_decay_steps=steps, **settings)
+                     learning_rate_end=lr_end, lr_decay_steps=steps, **settings)
     agent.lookahead = env.lookahead                 # remember which inputs this brain uses
     if init:
         old_inputs = load_brain(agent, init)
         widened = f" (widened from {old_inputs} to {env.obs_size} inputs)" if old_inputs < env.obs_size else ""
         print(f"Starting from the trained brain in {init}{widened}")
     print(f"Inputs: {env.obs_size} (look-ahead gates {env.lookahead}) | mirror memories: "
-          f"{'on' if config.MIRROR_AUGMENT else 'off'} | hard starts: {config.HARD_START_FRACTION:.0%}")
+          f"{'on' if config.MIRROR_AUGMENT else 'off'} | hard starts: {config.HARD_START_FRACTION:.0%} | "
+          f"step penalty: {config.REWARD_STEP}")
 
     log_file = open(csv_path, "w", newline="")
     log = csv.writer(log_file)
@@ -142,7 +164,7 @@ def train(steps, backend, name, seed, tracks, init=None):
     observation = env.reset()
     episode = 0
     recent_rewards, recent_progress, recent_finishes, recent_losses = [], [], [], []
-    best_score = np.inf
+    best_result = None
     best_lap_ever = None
     start_time = time.time()
 
@@ -195,15 +217,16 @@ def train(steps, backend, name, seed, tracks, init=None):
             if step % config.EVAL_EVERY == 0 and step >= config.WARMUP_STEPS:
                 result = evaluate(agent, eval_env)
                 agent.save(latest_path)
+                agent.save(os.path.join(snaps_dir, f"step_{step:07d}{extension}"))
                 lap = lap_seconds(result["best_lap_steps"])
                 lap_text = f" | best lap {lap:.2f}s" if lap and len(tracks) == 1 else ""
                 marker = ""
-                if result["score"] < best_score:
-                    best_score = result["score"]
+                if is_better(result, best_result):
+                    best_result = result
                     agent.save(best_path)
                     marker = "  <-- NEW BEST, saved"
                 print(f"   TEST DRIVES: {result['finished']}/{result['drives']} finished | "
-                      f"avg 3-lap time {result['score']:6.2f}s{lap_text} | "
+                      f"pace {result['pace']:.2f} s/lap{lap_text} | "
                       f"lr {agent.current_learning_rate():.1e}{marker}")
                 if result["failed_on"]:
                     print(f"   still failing on: {', '.join(result['failed_on'])}")
@@ -219,6 +242,7 @@ def train(steps, backend, name, seed, tracks, init=None):
     print(f"\nDone in {minutes:.1f} minutes, {episode} episodes.")
     print(f"Best model:   {best_path}")
     print(f"Latest model: {latest_path}")
+    print(f"Snapshots:    {snaps_dir}  (choose one with: python pick_best.py {name})")
     print(f"Log:          {csv_path}")
     print(f"Chart:        {png_path}")
 
@@ -234,7 +258,15 @@ if __name__ == "__main__":
     parser.add_argument("--tracks", nargs="+", default=[config.DEFAULT_TRACK],
                         help="tracks to train on, or 'train' for every track in config.TRAIN_TRACKS")
     parser.add_argument("--init", default=None, help="start from this trained model instead of from scratch")
+    parser.add_argument("--step-penalty", type=float, default=None,
+                        help=f"reward per decision (default {config.REWARD_STEP}); more negative = hurry more")
+    parser.add_argument("--epsilon", type=float, default=None, help="exploration to start from (0 to 1)")
+    parser.add_argument("--lr", type=float, default=None,
+                        help=f"starting learning rate (default {config.LEARNING_RATE}); smaller is gentler")
     args = parser.parse_args()
+
+    if args.step_penalty is not None:
+        config.REWARD_STEP = args.step_penalty           # the environment reads it from config
 
     tracks = config.TRAIN_TRACKS if args.tracks == ["train"] else args.tracks
     for track in tracks:
@@ -243,4 +275,4 @@ if __name__ == "__main__":
     backend = args.backend
     if args.init:
         backend = "numpy" if args.init.endswith(".npz") else "torch"    # must match the saved brain
-    train(steps, backend, args.name, args.seed, tracks, args.init)
+    train(steps, backend, args.name, args.seed, tracks, args.init, args.epsilon, args.lr)

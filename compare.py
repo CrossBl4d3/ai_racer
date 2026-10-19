@@ -33,13 +33,16 @@ def tournament(model_paths, races, seed, track):
                  rng.uniform(-config.START_JITTER_ANGLE, config.START_JITTER_ANGLE))
         starts.append((gate, nudge))
 
-    results = {name: {"times": [], "laps": [], "best_lap": None, "wins": 0} for name in names}
+    results = {name: {"times": [], "laps": [], "seconds": [], "per_race": [], "best_lap": None, "wins": 0}
+               for name in names}
     print(f"\n=== {track} ===   racing {len(names)} model(s) over {races} races...")
     for race_number, (gate, nudge) in enumerate(starts, 1):
         race_times = {}
         for name, agent in zip(names, agents):
             finished, seconds, lap_steps, _, laps_driven = drive(agent, env, gate, nudge)
             results[name]["laps"].append(laps_driven)
+            results[name]["seconds"].append(seconds)
+            results[name]["per_race"].append(seconds if finished else None)   # for head-to-head
             if finished:
                 results[name]["times"].append(seconds)
                 race_times[name] = seconds
@@ -54,16 +57,31 @@ def tournament(model_paths, races, seed, track):
         if race_number % 10 == 0:
             print(f"  {race_number}/{races} races done")
 
-    print(f"\n{'model':<20}{'races':>7}{'finished':>10}{'avg laps':>10}{'avg 3-lap':>11}{'best lap':>10}{'wins':>7}")
-    print("-" * 75)
+    print(f"\n{'model':<20}{'races':>7}{'finished':>10}{'avg laps':>10}{'pace':>11}{'avg 3-lap':>11}"
+          f"{'best lap':>10}{'wins':>7}")
+    print("-" * 86)
     ranking = sorted(names, key=lambda n: (-results[n]["wins"], -np.mean(results[n]["laps"]),
                                            np.mean(results[n]["times"] or [999])))
     for name in ranking:
         r = results[name]
         average = f"{np.mean(r['times']):.2f}s" if r["times"] else "--"
         best = f"{r['best_lap'] / config.STEPS_PER_SECOND:.2f}s" if r["best_lap"] else "--"
-        print(f"{name:<20}{races:>7}{len(r['times']):>10}{np.mean(r['laps']):>10.2f}{average:>11}"
+        pace = f"{sum(r['seconds']) / max(sum(r['laps']), 1e-6):.2f}s/lap"
+        print(f"{name:<20}{races:>7}{len(r['times']):>10}{np.mean(r['laps']):>10.2f}{pace:>11}{average:>11}"
               f"{best:>10}{r['wins']:>7}")
+    print("pace = seconds per lap driven, crashed races included (no survivorship bias)")
+
+    if len(names) > 1:                  # fair speed comparison: only races BOTH models finished
+        print("\nHEAD-TO-HEAD: row model's time minus column model's, over races both finished")
+        print("(negative = the row model is faster; the number in brackets = races compared)")
+        print(f"{'':<20}" + "".join(f"{n[:14]:>16}" for n in ranking))
+        for a in ranking:
+            cells = []
+            for b in ranking:
+                pairs = [(ta, tb) for ta, tb in zip(results[a]["per_race"], results[b]["per_race"])
+                         if a != b and ta is not None and tb is not None]
+                cells.append(f"{np.mean([ta - tb for ta, tb in pairs]):+.2f}s ({len(pairs)})" if pairs else "--")
+            print(f"{a:<20}" + "".join(f"{c:>16}" for c in cells))
     record = config.HUMAN_RECORDS.get(track)
     print(f"\nYour record lap on {track}: {f'{record:.2f}s' if record else 'not set yet'}")
     return {name: (len(results[name]["times"]), np.mean(results[name]["laps"])) for name in names}
