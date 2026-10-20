@@ -46,6 +46,13 @@ RANDOM_TRACK_DENT_CHANCE = 0.5       # chance of one deep dent (a hairpin-like b
 RANDOM_TRACK_DENT_DEPTH = (0.4, 0.7)   # a dented point keeps this share of its radius
 RANDOM_TRACK_WIDTH = (75, 110)       # road width range in pixels
 RANDOM_TRACK_MAX_ATTEMPTS = 200      # shapes tried per seed before giving up
+RANDOM_POOL_SIZE = 200               # random tracks held ready during training
+RANDOM_POOL_REFRESH = 50             # every this many episodes, one pool track is swapped for a new one
+RANDOM_POOL_FIRST_SEED = 0           # training pool seeds count up from here
+RANDOM_SHARE = 0.5                   # in a "mix" run: share of episodes on random tracks
+RANDOM_TRAIN_STEPS = 500_000         # default length of a run that uses random tracks
+VALIDATION_TRACKS = [f"random_{seed}" for seed in range(90000, 90020)]    # for choosing snapshots
+TEST_RANDOM_TRACKS = [f"random_{seed}" for seed in range(95000, 95020)]   # part of the final exam
 
 # --- Race ---
 LAP_TIME_LIMIT = 60           # seconds

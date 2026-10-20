@@ -15,7 +15,7 @@ torch.set_num_threads(1)
 from env.racing_env import RacingEnv
 from train import drive
 from watch import load_agent
-from game.tracks import track_names
+from game.tracks import expand_track_words
 
 
 def tournament(model_paths, races, seed, track):
@@ -93,16 +93,16 @@ if __name__ == "__main__":
     parser.add_argument("--races", type=int, default=50)
     parser.add_argument("--seed", type=int, default=123)
     parser.add_argument("--tracks", nargs="+", default=[config.DEFAULT_TRACK],
-                        help="track names, or: 'train' (training tracks), 'exam' (the test track), 'all'")
+                                                help="track names, or shortcuts: train, exam, handmade (= all), val, test_random")
     args = parser.parse_args()
     paths = sorted({path for pattern in args.models for path in (glob.glob(pattern) or [pattern])})
 
-    shortcuts = {"train": config.TRAIN_TRACKS, "exam": [config.TEST_TRACK, config.TEST_TRACK + "_mirror"], "all": track_names()}
-    tracks = [t for name in args.tracks for t in shortcuts.get(name, [name])]
-    finishes = {}
+    tracks = expand_track_words(args.tracks)
+    finishes, totals = {}, {}
     for track in tracks:
         for name, (count, laps) in tournament(paths, args.races, args.seed, track).items():
             finishes.setdefault(name, {})[track] = f"{count:>3} | {laps:4.2f}"
+            totals.setdefault(name, []).append((count, laps))
 
     if len(tracks) > 1:                               # summary table: one row per track
         print(f"\nSUMMARY: races finished (out of {args.races}) | average laps driven (out of {config.EPISODE_LAPS})")
@@ -110,3 +110,6 @@ if __name__ == "__main__":
         for track in tracks:
             marker = "  <- exam" if track.startswith(config.TEST_TRACK) else ""
             print(f"{track:<18}" + "".join(f"{finishes[name][track]:>16}" for name in finishes) + marker)
+            print("-" * (18 + 16 * len(finishes)))
+            cells = [f"{sum(c for c, _ in totals[n])}/{args.races * len(tracks)}" for n in finishes]
+            print(f"{'TOTAL finished':<18}" + "".join(f"{c:>16}" for c in cells))

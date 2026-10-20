@@ -3,7 +3,8 @@
     python train.py --name run3                                   one track (the oval)
     python train.py --name multi1 --tracks train                  every training track
     python train.py --name multi2 --tracks train --init models/numpy2_best.npz   start from a trained brain
-    python train.py --name pace1 --tracks train --backend numpy --step-penalty -0.05   hurry more
+    python train.py --name rand1 --tracks random --backend numpy  a pool of random tracks only
+    python train.py --name mix1 --tracks mix --backend numpy      training tracks + random pool
 """
 import argparse
 import csv
@@ -15,7 +16,7 @@ import torch
 torch.set_num_threads(1)          # tiny network: one CPU thread is fastest
 from env.racing_env import RacingEnv
 from agent.dqn_agent import DQNAgent
-from game.tracks import get_definition
+from game.tracks import get_definition, expand_track_words
 from agent.brains import load_brain
 
 
@@ -116,7 +117,7 @@ def plot_training(csv_path, png_path):
     plt.close(fig)
 
 
-def train(steps, backend, name, seed, tracks, init=None, epsilon_start=None, learning_rate=None):
+def train(steps, backend, name, seed, tracks, init=None, epsilon_start=None, learning_rate=None, pool=0):
     os.makedirs("models", exist_ok=True)
     os.makedirs("logs", exist_ok=True)
     extension = ".pt" if backend == "torch" else ".npz"
@@ -129,9 +130,10 @@ def train(steps, backend, name, seed, tracks, init=None, epsilon_start=None, lea
 
     if config.TEST_TRACK in tracks:
         print(f"WARNING: '{config.TEST_TRACK}' is the exam track. Training on it spoils the exam!")
-    env = RacingEnv(random_start=config.RANDOM_START, seed=seed, tracks=tracks,
-                    hard_starts=config.HARD_START_FRACTION > 0)
-    eval_env = RacingEnv(tracks=tracks)
+    env = RacingEnv(random_start=config.RANDOM_START, seed=seed, tracks=tracks, random_pool=pool,
+                    hard_starts=config.HARD_START_FRACTION > 0 and not pool)
+    # quick test drives: the training tracks, plus 8 validation tracks when random tracks are used
+    eval_env = RacingEnv(tracks=list(tracks) + (config.VALIDATION_TRACKS[:8] if pool else []))
     settings = {}
     if init:
         settings["epsilon_start"] = config.FINE_TUNE_EPSILON       # it can already drive: explore less
@@ -158,7 +160,12 @@ def train(steps, backend, name, seed, tracks, init=None, epsilon_start=None, lea
                   "reason", "epsilon", "loss"])
 
     print(f"Training '{name}' with the {backend} network for {steps:,} decisions.")
-    print(f"Tracks: {', '.join(tracks)}")
+    if pool:
+        mix = f"{', '.join(tracks)} + " if tracks else ""
+        print(f"Tracks: {mix}a pool of {pool} random tracks (one swapped every "
+              f"{config.RANDOM_POOL_REFRESH} episodes)" + (f", {config.RANDOM_SHARE:.0%} of episodes random" if tracks else ""))
+    else:
+        print(f"Tracks: {', '.join(tracks)}")
     print("Press Ctrl+C to stop early (progress is saved).\n")
 
     observation = env.reset()
@@ -256,7 +263,8 @@ if __name__ == "__main__":
     parser.add_argument("--name", default="run1", help="name for the saved model and logs")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--tracks", nargs="+", default=[config.DEFAULT_TRACK],
-                        help="tracks to train on, or 'train' for every track in config.TRAIN_TRACKS")
+                        help="tracks to train on: names, 'train' (config.TRAIN_TRACKS), "
+                             "'random' (a random track pool) or 'mix' (training tracks + random pool)")
     parser.add_argument("--init", default=None, help="start from this trained model instead of from scratch")
     parser.add_argument("--step-penalty", type=float, default=None,
                         help=f"reward per decision (default {config.REWARD_STEP}); more negative = hurry more")
@@ -268,11 +276,21 @@ if __name__ == "__main__":
     if args.step_penalty is not None:
         config.REWARD_STEP = args.step_penalty           # the environment reads it from config
 
-    tracks = config.TRAIN_TRACKS if args.tracks == ["train"] else args.tracks
+    pool = 0
+    if args.tracks == ["random"]:
+        tracks, pool = [], config.RANDOM_POOL_SIZE
+    elif args.tracks == ["mix"]:
+        tracks, pool = list(config.TRAIN_TRACKS), config.RANDOM_POOL_SIZE
+    else:
+        tracks = expand_track_words(args.tracks)
     for track in tracks:
         get_definition(track)                         # stops here with a clear message if a name is wrong
-    steps = args.steps or (config.TRAIN_STEPS if len(tracks) == 1 else config.MULTI_TRAIN_STEPS)
+    if pool:
+        default_steps = config.RANDOM_TRAIN_STEPS
+    else:
+        default_steps = config.TRAIN_STEPS if len(tracks) == 1 else config.MULTI_TRAIN_STEPS
+    steps = args.steps or default_steps
     backend = args.backend
     if args.init:
         backend = "numpy" if args.init.endswith(".npz") else "torch"    # must match the saved brain
-    train(steps, backend, args.name, args.seed, tracks, args.init, args.epsilon, args.lr)
+    train(steps, backend, args.name, args.seed, tracks, args.init, args.epsilon, args.lr, pool)

@@ -18,21 +18,31 @@ class RacingEnv:
     MIRROR_ACTION = [0, 2, 1, 3, 4]      # in a mirror, left and right swap; everything else stays
 
     def __init__(self, render=False, wall_mode="reset", random_start=False, seed=None,
-                 track_name=None, tracks=None, lookahead=None, hard_starts=False):
+                 track_name=None, tracks=None, lookahead=None, hard_starts=False,
+                 random_pool=0, random_share=config.RANDOM_SHARE):
         # One Race per track, built once. With several tracks, each episode picks one at random.
-        names = tracks or [track_name or config.DEFAULT_TRACK]
-        self.races = {name: Race(wall_mode=wall_mode, allow_reverse=False, track_name=name) for name in names}
-        self.race = self.races[names[0]]
-        self.random_start = random_start
+        # random_pool > 0 adds that many random tracks, swapped for new ones as training goes on.
+        self.wall_mode = wall_mode
         self.rng = np.random.default_rng(seed)
+        self.races = {}
+        self.crash_counts = {}           # where the car crashes, per track and gate (hard starts)
+        names = list(tracks) if tracks else ([] if random_pool else [track_name or config.DEFAULT_TRACK])
+        for name in names:
+            self._add_track(name)
+        self.fixed_names = names
+        self.pool_names = []
+        self.next_seed = config.RANDOM_POOL_FIRST_SEED
+        for _ in range(random_pool):
+            self._add_pool_track()
+        # with both fixed and random tracks, random_share decides which group each episode uses
+        self.random_share = random_share if (self.fixed_names and self.pool_names) else None
+        self.episodes = 0
+        self.race = self.races[(self.fixed_names or self.pool_names)[0]]
+        self.random_start = random_start
         self.n_actions = len(self.ACTIONS)
         self.set_lookahead(config.LOOKAHEAD_GATES if lookahead is None else lookahead)
-
-        # Where the car crashes, per track and gate, so training can practise those spots
         self.hard_starts = hard_starts
-        self.crash_counts = {name: np.zeros(race.track.num_gates()) for name, race in self.races.items()}
-        
-                # How many nudged starts were checked, and how many had to fall back to the plain start
+        # How many nudged starts were checked, and how many had to fall back to the plain start
         self.starts_checked = 0
         self.unfair_starts = 0
         self.render_enabled = render
@@ -47,6 +57,23 @@ class RacingEnv:
     # ------------------------------------------------------------------
     #  The two core functions
     # ------------------------------------------------------------------
+
+    def _add_track(self, name):
+        self.races[name] = Race(wall_mode=self.wall_mode, allow_reverse=False, track_name=name)
+        self.crash_counts[name] = np.zeros(self.races[name].track.num_gates())
+
+    def _add_pool_track(self):
+        name = f"random_{self.next_seed}"
+        self.next_seed += 1
+        self._add_track(name)
+        self.pool_names.append(name)
+
+    def _refresh_pool(self):
+        """Swap one random pool track for a brand-new one, so training keeps meeting new tracks."""
+        old = self.pool_names.pop(int(self.rng.integers(len(self.pool_names))))
+        del self.races[old], self.crash_counts[old]
+        self._add_pool_track()
+
     def set_lookahead(self, gates):
         """Which gates ahead the car is told about. Older models were trained with none."""
         self.lookahead = list(gates)
@@ -107,7 +134,15 @@ class RacingEnv:
         if track is not None:
             self.race = self.races[track]                   # a specific track was asked for
         elif len(self.races) > 1:
-            names = list(self.races)
+            self.episodes += 1
+            if self.pool_names and self.episodes % config.RANDOM_POOL_REFRESH == 0:
+                self._refresh_pool()
+            if self.random_share is None:
+                names = list(self.races)
+            elif self.rng.random() < self.random_share:
+                names = self.pool_names
+            else:
+                names = self.fixed_names
             self.race = self.races[names[int(self.rng.integers(len(names)))]]
         if start_gate is None:
             if self.random_start:

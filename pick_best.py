@@ -2,7 +2,7 @@
 
     python pick_best.py multi3                tests every file in models/multi3_snaps/
     python pick_best.py speed1 --races 5      fewer races per track (faster)
-
+    python pick_best.py rand1 --tracks val
 Each snapshot drives the same fair random starts on every TRAINING track (never the exam).
 Rule: among the snapshots within PICK_FINISH_TOLERANCE races of the most finishes, the
 fastest pace wins. The winner is copied to models/<name>_pick.<ext>, and a chart of finish
@@ -19,6 +19,7 @@ torch.set_num_threads(1)
 from env.racing_env import RacingEnv
 from train import evaluate
 from watch import load_agent
+from game.tracks import expand_track_words
 
 
 def fair_starts(env, races, seed):
@@ -68,14 +69,17 @@ def plot(points, chosen, total, png_path, name):
     plt.close(fig)
 
 
-def pick(name, races, seed):
-    paths = sorted(glob.glob(os.path.join("models", f"{name}_snaps", "step_*")))
+def pick(name, races, seed, tracks, every):
+    paths = sorted(glob.glob(os.path.join("models", f"{name}_snaps", "step_*")))[every - 1::every]
     if not paths:
         raise SystemExit(f"No snapshots in models/{name}_snaps/. Train with the new train.py first.")
-    env = RacingEnv(tracks=config.TRAIN_TRACKS)
+    exam = set(expand_track_words(["exam", "test_random"]))
+    if exam & set(tracks):
+        raise SystemExit("Choosing on exam tracks would leak the exam into the choice. Use train or val.")
+    env = RacingEnv(tracks=tracks)
     starts = fair_starts(env, races, seed)
     print(f"Testing {len(paths)} snapshots of '{name}' on {len(starts)} fair starts "
-          f"({races} per training track, never the exam)...\n")
+          f"({races} per track on {len(tracks)} tracks, never the exam)...\n")
 
     points = []
     for path in paths:
@@ -109,5 +113,8 @@ if __name__ == "__main__":
     parser.add_argument("name", help="the training run's name, e.g. multi3")
     parser.add_argument("--races", type=int, default=10, help="races per training track for each snapshot")
     parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--tracks", nargs="+", default=["train"],
+                        help="tracks to choose on: 'train', 'val', or track names (never the exam)")
+    parser.add_argument("--every", type=int, default=1, help="test every Nth snapshot only (faster)")
     args = parser.parse_args()
-    pick(args.name, args.races, args.seed)
+    pick(args.name, args.races, args.seed, expand_track_words(args.tracks), args.every)

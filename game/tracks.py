@@ -80,6 +80,16 @@ def get_definition(name):
     return TRACKS[base], mirrored
 
 
+def expand_track_words(words):
+    """Turn shortcuts into track names: train, exam, handmade (all 10), val, test_random."""
+    import config
+    shortcuts = {"train": config.TRAIN_TRACKS,
+                 "exam": [config.TEST_TRACK, config.TEST_TRACK + "_mirror"],
+                 "handmade": track_names(), "all": track_names(),
+                 "val": config.VALIDATION_TRACKS,
+                 "test_random": config.TEST_RANDOM_TRACKS}
+    return [name for word in words for name in shortcuts.get(word, [word])]
+
 def track_name(text):
     """For argparse: accept any valid track name, including random_<number>."""
     import argparse
