@@ -4,6 +4,7 @@
     python compare.py models/*_best.*  --races 100
     python compare.py models/numpy2_best.npz models/multi1_best.npz --tracks exam
     python compare.py models/multi1_best.npz --tracks all --races 20
+    python compare.py models/base1_pick.npz models/rand1_pick.npz --tracks handmade --races 20
 """
 import argparse
 import glob
@@ -93,7 +94,7 @@ if __name__ == "__main__":
     parser.add_argument("--races", type=int, default=50)
     parser.add_argument("--seed", type=int, default=123)
     parser.add_argument("--tracks", nargs="+", default=[config.DEFAULT_TRACK],
-                                                help="track names, or shortcuts: train, exam, handmade (= all), val, test_random")
+                        help="track names, or shortcuts: train, exam, handmade (= all), val, test_random")
     args = parser.parse_args()
     paths = sorted({path for pattern in args.models for path in (glob.glob(pattern) or [pattern])})
 
@@ -110,6 +111,6 @@ if __name__ == "__main__":
         for track in tracks:
             marker = "  <- exam" if track.startswith(config.TEST_TRACK) else ""
             print(f"{track:<18}" + "".join(f"{finishes[name][track]:>16}" for name in finishes) + marker)
-            print("-" * (18 + 16 * len(finishes)))
-            cells = [f"{sum(c for c, _ in totals[n])}/{args.races * len(tracks)}" for n in finishes]
-            print(f"{'TOTAL finished':<18}" + "".join(f"{c:>16}" for c in cells))
+        print("-" * (18 + 16 * len(finishes)))
+        cells = [f"{sum(c for c, _ in totals[n])}/{args.races * len(tracks)}" for n in finishes]
+        print(f"{'TOTAL finished':<18}" + "".join(f"{c:>16}" for c in cells))
