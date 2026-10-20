@@ -217,3 +217,5 @@ python -m sandbox.test_env bench    # how fast the environment runs
 
 - Car, tree and grass graphics: [Kenney Racing Pack](https://kenney.nl/assets/racing-pack) (CC0).
 - Built by **Humaam Ghazal** with guidance from Claude (Anthropic).
+
+📖 **Full project write-up** (every phase, decision, bug and result, with diagrams): [read it here](https://claude.ai/artifact/7W4VtzHq6igG5FUSbyxSh6)
